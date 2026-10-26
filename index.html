@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REAL DRIVE 2 - To'liq 3D Simulyator</title>
+<style>
+body{margin:0;overflow:hidden;background:#87CEEB;font-family:'Segoe UI',Tahoma,sans-serif;color:#fff}
+#ui{position:absolute;bottom:30px;right:30px;width:230px;background:linear-gradient(135deg,rgba(15,15,15,.9),rgba(0,0,0,.8));border:2px solid rgba(255,200,0,.4);border-radius:15px;padding:14px 22px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.7);pointer-events:none}
+#spd{font-size:56px;font-weight:900;font-family:'Courier New',monospace;color:#fc0;line-height:1}
+#unit{font-size:14px;color:#aaa;letter-spacing:2px}
+#gear{font-size:20px;margin:4px 0 8px}
+#fuelbox{height:12px;background:#333;border-radius:6px;overflow:hidden;margin-top:4px}
+#fuelfill{height:100%;width:100%;background:#3c3;transition:background .3s}
+#fuelfill.low{background:#e33}
+#fueltxt,#cash,#dist{font-size:13px;margin-top:5px;color:#ddd}
+#controls{position:absolute;top:20px;left:20px;background:rgba(0,0,0,.6);padding:14px 18px;border-radius:10px;font-size:13px;border-left:4px solid #fc0;pointer-events:none}
+.key{color:#fc0;font-weight:bold}
+#msg{position:absolute;bottom:18%;left:50%;transform:translateX(-50%);font-size:24px;font-weight:bold;text-shadow:2px 2px 8px #000;text-align:center}
+#warning{position:absolute;top:18%;left:50%;transform:translate(-50%,-50%);font-size:30px;font-weight:bold;color:#f33;text-shadow:2px 2px 10px #000,0 0 20px #f00;display:none;animation:bl 1s infinite;text-align:center}
+@keyframes bl{50%{opacity:.5}}
+#doc-ui{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(10,10,10,.95);border:3px solid #fc0;border-radius:15px;padding:30px;text-align:center;display:none;box-shadow:0 0 50px rgba(255,200,0,.5);z-index:100}
+#doc-ui h2{margin:0 0 10px 0;color:#fc0;font-size:24px}
+#game-over-ui{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);display:none;flex-direction:column;justify-content:center;align-items:center;z-index:200}
+#game-over-ui h1{font-size:60px;color:#f33;margin:0;text-shadow:0 0 20px #f00}
+#restart-btn{margin-top:20px;padding:15px 40px;font-size:20px;font-weight:bold;background:#fc0;color:#000;border:none;border-radius:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="controls"><b>BOSHQARUV:</b><br>
+<span class="key">W/↑</span> Gaz &nbsp; <span class="key">S/↓</span> Tormoz<br>
+<span class="key">A/D</span> Burilish &nbsp; <span class="key">Space</span> Qo'l tormozi<br>
+<span class="key">C</span> Kamera &nbsp; <span class="key">H</span> Signal<br>
+<b>Yoqilg'i:</b> ⛽ belgisidagi shaxobchaga kirib to'xtang</div>
+
+<div id="ui">
+<div id="spd">0</div><div id="unit">KM/H</div><div id="gear">N</div>
+<div id="fuelbox"><div id="fuelfill"></div></div>
+<div id="fueltxt">⛽ 45 L</div><div id="dist"></div><div id="cash">💵 350 000 so'm</div>
+</div>
+
+<div id="warning">🚨 QOIDABUZARLIK! POLITSIYA QUVMOQDA! 🚨</div>
+<div id="msg"></div>
+
+<div id="doc-ui">
+    <h2>👮‍♂️ HUJJATLAR TEKSHIRILMOQDA</h2>
+    <p>Sabab: <b id="violation-reason">Tezlikni oshirish</b></p>
+    <p style="color: #ff5555; font-size: 16px; font-weight:bold;">Jarima: -10 000 so'm</p>
+</div>
+
+<div id="game-over-ui">
+    <h1>O'YIN TUGADI</h1>
+    <p>Pulingiz yoki yoqilg'ingiz tugadi!</p>
+    <button id="restart-btn" onclick="location.reload()">Qaytadan o'ynash</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ===== ASOSIY YORDAMCHI FUNKSIYALAR =====
+const rnd=(k,n)=>{const v=Math.sin(k*127.1+n*311.7)*43758.5453;return v-Math.floor(v)};
+const $=id=>document.getElementById(id);
+const B=(w,h,d)=>new THREE.BoxGeometry(w,h,d);
+
+// ===== SAHNA VA KAMERA =====
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87CEEB);
+scene.fog=new THREE.Fog(0x87CEEB,100,350);
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,1200);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+document.body.appendChild(renderer.domElement);
+
+// Atrof-muhit xaritasi (Mashina yaltirashi uchun)
+(function(){
+  const c=document.createElement('canvas');c.width=512;c.height=256;const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,256);
+  g.addColorStop(0,'#4a90d9');g.addColorStop(.48,'#cfe8ff');g.addColorStop(.5,'#fff');g.addColorStop(.52,'#555');g.addColorStop(1,'#222');
+  x.fillStyle=g;x.fillRect(0,0,512,256);x.fillStyle='#fff';x.fillRect(90,40,60,18);x.fillRect(330,60,90,14);
+  const t=new THREE.CanvasTexture(c);t.mapping=THREE.EquirectangularReflectionMapping;
+  scene.environment=new THREE.PMREMGenerator(renderer).fromEquirectangular(t).texture;
+})();
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x444444,.5));
+const sun=new THREE.DirectionalLight(0xffffff,1);
+sun.castShadow=true;Object.assign(sun.shadow.camera,{left:-60,right:60,top:60,bottom:-60,far:500});
+sun.shadow.mapSize.set(2048,2048);scene.add(sun,sun.target);
+
+// ===== DUNYO VA YO'L =====
+function roadTex(){
+  const c=document.createElement('canvas');c.width=256;c.height=320;const x=c.getContext('2d');
+  x.fillStyle='#2b2b2b';x.fillRect(0,0,256,320);
+  for(let i=0;i<6000;i++){x.fillStyle=Math.random()>.5?'#363636':'#1f1f1f';x.fillRect(Math.random()*256,Math.random()*320,2,2)}
+  x.fillStyle='#e8c200';x.fillRect(123,0,3,320);x.fillRect(130,0,3,320);
+  x.fillStyle='#eee';x.fillRect(8,0,5,320);x.fillRect(243,0,5,320);
+  [64,192].forEach(p=>{x.fillRect(p-2,0,4,75);x.fillRect(p-2,160,4,75)});
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(1,100);t.anisotropy=8;return t;
+}
+function grassTex(){
+  const c=document.createElement('canvas');c.width=c.height=256;const x=c.getContext('2d');
+  x.fillStyle='#3a5f30';x.fillRect(0,0,256,256);
+  for(let i=0;i<4000;i++){x.fillStyle=['#44703a','#2f5226','#4b7a40'][i%3];x.fillRect(Math.random()*256,Math.random()*256,2,3)}
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(400,400);return t;
+}
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(3500,3500),new THREE.MeshStandardMaterial({map:grassTex(),roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+const road=new THREE.Mesh(new THREE.PlaneGeometry(24,3000),new THREE.MeshStandardMaterial({map:roadTex(),roughness:.85}));
+road.rotation.x=-Math.PI/2;road.position.y=.01;road.receiveShadow=true;scene.add(road);
+const swMat=new THREE.MeshStandardMaterial({color:0x9a9a9a,roughness:.9});
+[-14,14].forEach(x=>{const s=new THREE.Mesh(B(4,.4,3000),swMat);s.position.set(x,.2,0);s.receiveShadow=true;scene.add(s)});
+
+// ===== UYLAR, DARAXTLAR, CHIROQLAR =====
+const colliders=[],texCache={};
+function wallMat(col,rx,ry){
+  const key=col+rx;
+  if(!texCache[key]){
+    const c=document.createElement('canvas');c.width=256;c.height=128;const x=c.getContext('2d');
+    x.fillStyle=col;x.fillRect(0,0,256,128);
+    for(let r=0;r<2;r++)for(let i=0;i<4;i++){
+      x.fillStyle='#fff';x.fillRect(18+i*60,14+r*60,40,40);
+      x.fillStyle='#1c2a38';x.fillRect(21+i*60,17+r*60,34,34);
+      x.fillStyle='#456';x.fillRect(21+i*60,17+r*60,34,12);
+    }
+    const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(rx,ry);
+    texCache[key]=new THREE.MeshStandardMaterial({map:t,roughness:.9});
+  }
+  return texCache[key];
+}
+const roofMats=[new THREE.MeshStandardMaterial({color:0x8b3a2b,roughness:.8}),new THREE.MeshStandardMaterial({color:0x4a5560,roughness:.8})];
+const doorMat=new THREE.MeshStandardMaterial({color:0x4a2c17,roughness:.7}),flatMat=new THREE.MeshStandardMaterial({color:0x555555});
+const gRoof=new THREE.ConeGeometry(1,1,4);gRoof.rotateY(Math.PI/4);
+const wallCols=['#e8d9b8','#d9a066','#c9d6df','#e6c8c8','#b8d4b0','#f0f0e8'];
+
+function house(x,z,w,d,h,side,big,seed){
+  const m=new THREE.Mesh(B(w,h,d),wallMat(wallCols[Math.floor(rnd(seed,5)*6)],big?3:1,big?4:1));
+  m.position.set(x,h/2,z);m.castShadow=m.receiveShadow=true;scene.add(m);
+  const fx=x-side*(w/2+.03);
+  if(!big){
+    const r=new THREE.Mesh(gRoof,roofMats[Math.floor(rnd(seed,6)*2)]);
+    r.scale.set((w/2+.6)/.7071,2.4,(d/2+.6)/.7071);r.position.set(x,h+1.2,z);r.castShadow=true;scene.add(r);
+    const dr=new THREE.Mesh(B(.1,2.2,1.2),doorMat);dr.position.set(fx,1.1,z);scene.add(dr);
+  }else{
+    const r=new THREE.Mesh(B(w+.4,.5,d+.4),flatMat);r.position.set(x,h+.25,z);scene.add(r);
+    const dr=new THREE.Mesh(B(.1,2.6,2.6),doorMat);dr.position.set(fx,1.3,z);scene.add(dr);
+  }
+  colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2});
+}
+
+const gTrunk=new THREE.CylinderGeometry(.25,.3,2.4,8),gLeaf=new THREE.IcosahedronGeometry(1.8,0);
+const trunkMat=new THREE.MeshStandardMaterial({color:0x5a3a1e,roughness:1});
+const leafMats=[0x2e7d32,0x3f8f3a].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:.9}));
+function tree(x,z,s){
+  const t=new THREE.Mesh(gTrunk,trunkMat);t.position.set(x,1.2,z);t.castShadow=true;scene.add(t);
+  const l=new THREE.Mesh(gLeaf,leafMats[s%2]);l.position.set(x,3.8,z);l.castShadow=true;scene.add(l);
+  colliders.push({minX:x-.4,maxX:x+.4,minZ:z-.4,maxZ:z+.4});
+}
+
+const gPole=new THREE.CylinderGeometry(.2,.2,8),poleMat=new THREE.MeshStandardMaterial({color:0x333333});
+const gLamp=B(1.5,.3,.5),lampMat=new THREE.MeshStandardMaterial({color:0xffffcc,emissive:0xffffaa,emissiveIntensity:.5});
+function streetLight(x,z){
+  const p=new THREE.Mesh(gPole,poleMat);p.position.set(x,4,z);scene.add(p);
+  const l=new THREE.Mesh(gLamp,lampMat);l.position.set(x+(x>0?-.8:.8),8,z);scene.add(l);
+}
+
+// ===== YOQILG'I SHAXOBCHASI =====
+function signTex(){
+  const c=document.createElement('canvas');c.width=256;c.height=112;const x=c.getContext('2d');
+  x.fillStyle='#ffd400';x.fillRect(0,0,256,112);x.fillStyle='#c00';x.fillRect(0,0,256,14);x.fillRect(0,98,256,14);
+  x.fillStyle='#111';x.font='bold 36px Arial';x.textAlign='center';x.fillText("⛽ YOQILG'I",128,70);
+  return new THREE.CanvasTexture(c);
+}
+const SX=24; // Shaxobcha X koordinatasi
+function buildStation(z){
+  const pad=new THREE.Mesh(new THREE.PlaneGeometry(20,34),new THREE.MeshStandardMaterial({color:0x777777,roughness:.9}));
+  pad.rotation.x=-Math.PI/2;pad.position.set(SX,.03,z);pad.receiveShadow=true;scene.add(pad);
+  const zone=new THREE.Mesh(new THREE.PlaneGeometry(14,16),new THREE.MeshBasicMaterial({color:0x22cc55,transparent:true,opacity:.25}));
+  zone.rotation.x=-Math.PI/2;zone.position.set(SX,.05,z);scene.add(zone);
+  const roof=new THREE.Mesh(B(14,.5,16),new THREE.MeshStandardMaterial({color:0xf2f2f2}));roof.position.set(SX,5.7,z);roof.castShadow=true;scene.add(roof);
+  const st=new THREE.Mesh(B(14.1,.35,16.1),new THREE.MeshStandardMaterial({color:0xcc1111}));st.position.set(SX,5.35,z);scene.add(st);
+  [[-6,-6],[6,-6],[-6,6],[6,6]].forEach(([a,b])=>{const p=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,5.4),new THREE.MeshStandardMaterial({color:0xdddddd}));p.position.set(SX+a,2.7,z+b);scene.add(p)});
+  [-3,3].forEach(o=>{
+    const p=new THREE.Mesh(B(.9,1.8,.6),new THREE.MeshStandardMaterial({color:0xf5f5f5}));p.position.set(SX,.9,z+o);scene.add(p);
+    const t=new THREE.Mesh(B(1,.2,.7),new THREE.MeshStandardMaterial({color:0xcc1111}));t.position.set(SX,1.9,z+o);scene.add(t);
+    const s=new THREE.Mesh(B(.05,.35,.4),new THREE.MeshStandardMaterial({color:0x33ff66,emissive:0x22cc44,emissiveIntensity:1}));s.position.set(SX-.47,1.35,z+o);scene.add(s);
+    colliders.push({minX:SX-.5,maxX:SX+.5,minZ:z+o-.35,maxZ:z+o+.35});
+  });
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.15,.15,8),poleMat);pole.position.set(15,4,z+14);scene.add(pole);
+  const sign=new THREE.Mesh(B(.2,2.2,5),new THREE.MeshBasicMaterial({map:signTex()}));sign.position.set(15,8.6,z+14);scene.add(sign);
+}
+
+// ===== SVETOFOR VA RADAR =====
+let trafficLightState = 0; // 0: Qizil, 1: Sariq, 2: Yashil
+let lightTimer = 0;
+const tlGroup = new THREE.Group();
+const tlPole = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 6), new THREE.MeshStandardMaterial({color: 0x333}));
+tlPole.position.set(12, 3, 80); tlGroup.add(tlPole);
+const tlBox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.5, 0.8), new THREE.MeshStandardMaterial({color: 0x111}));
+tlBox.position.set(12, 5.5, 80); tlGroup.add(tlBox);
+const redL = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0xff0000}));
+redL.position.set(12, 6.2, 79.5); tlGroup.add(redL);
+const yellowL = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0x555500}));
+yellowL.position.set(12, 5.5, 79.5); tlGroup.add(yellowL);
+const greenL = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0x005500}));
+greenL.position.set(12, 4.8, 79.5); tlGroup.add(greenL);
+scene.add(tlGroup);
+
+// Radar belgisi (80 km/h)
+const radarSign = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({color: 0xffffff, map: (()=>{
+    const c = document.createElement('canvas'); c.width=128; c.height=128; const x = c.getContext('2d');
+    x.fillStyle='#fff'; x.fillRect(0,0,128,128); x.fillStyle='#000'; x.font='bold 50px Arial'; x.fillText('80', 35, 80);
+    x.strokeStyle='red'; x.lineWidth=8; x.strokeRect(5,5,118,118);
+    return new THREE.CanvasTexture(c);
+})()}));
+radarSign.position.set(-12, 3, 150); radarSign.rotation.y = Math.PI/2; scene.add(radarSign);
+
+// Shahar generatsiyasi
+for(let k=-25;k<=25;k++){
+  const z=k*40,kk=((k%30)+30)%30;
+  for(const side of [-1,1]){
+    const n=side>0?1:2;
+    streetLight(side*16,z+10);
+    if(side>0&&kk%10===3){buildStation(z);continue}
+    const r=rnd(kk,n),r2=rnd(kk,n+7),big=r>.82;
+    const w=big?14:8+r2*5,d=big?22:9+r*6,h=big?16+r2*10:4+r2*2;
+    house(side*(big?36:31+r*4),z+(rnd(kk,n+3)-.5)*6,w,d,h,side,big,kk*3+n);
+    tree(side*19.5,z-12+r*6,kk+n);
+  }
+}
+
+// ===== MASHINA MODELLARI =====
+const M={
+  glass:new THREE.MeshPhysicalMaterial({color:0x0a1218,metalness:.9,roughness:.03,transparent:true,opacity:.82,envMapIntensity:1.5}),
+  black:new THREE.MeshStandardMaterial({color:0x101010,roughness:.6}),
+  chrome:new THREE.MeshStandardMaterial({color:0xffffff,metalness:1,roughness:.08}),
+  tire:new THREE.MeshStandardMaterial({color:0x151515,roughness:.95}),
+  rim:new THREE.MeshStandardMaterial({color:0xcfd3d8,metalness:1,roughness:.15}),
+  lens:new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xfff4cc,emissiveIntensity:1.6}),
+  tail:new THREE.MeshStandardMaterial({color:0xff0000,emissive:0xaa0000,emissiveIntensity:1.2}),
+  seat:new THREE.MeshStandardMaterial({color:0x222222,roughness:.8}),
+  disc:new THREE.MeshStandardMaterial({color:0x777777,metalness:.9,roughness:.4}),
+  cal:new THREE.MeshStandardMaterial({color:0xcc0000,roughness:.4})
+};
+
+function ext(pts,w,b){
+  const s=new THREE.Shape();s.moveTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++){const p=pts[i];p.length===4?s.quadraticCurveTo(p[2],p[3],p[0],p[1]):s.lineTo(p[0],p[1])}
+  const g=new THREE.ExtrudeGeometry(s,{depth:w-2*b,bevelEnabled:true,bevelThickness:b,bevelSize:b,bevelSegments:3,curveSegments:12});
+  g.translate(0,0,-(w-2*b)/2);g.rotateY(-Math.PI/2);return g;
+}
+
+const GEO={
+  body:ext([[-2.25,.3],[2.25,.3],[2.3,.6],[2.2,.84,2.3,.82],[1.6,.92],[.85,.98],[-1.1,.98],[-1.9,.95],[-2.25,.9]],1.9,.04),
+  glass:ext([[.85,.98],[.3,1.4],[-.45,1.4],[-1.1,.98]],1.7,.01),
+  roof:ext([[.32,1.38],[.3,1.45],[-.45,1.45],[-.5,1.38]],1.74,.02),
+  tire:new THREE.CylinderGeometry(.37,.37,.26,24),rim:new THREE.CylinderGeometry(.26,.26,.27,24),
+  torus:new THREE.TorusGeometry(.3,.08,8,24),arch:new THREE.CylinderGeometry(.46,.46,.02,24)
+};
+
+function createCar(col,police,lite){
+  const car=new THREE.Group(),ch=new THREE.Group();
+  const paint=new THREE.MeshPhysicalMaterial({color:col,metalness:.6,roughness:.25,clearcoat:1,clearcoatRoughness:.05,envMapIntensity:1.2});
+  const add=(g,m,x,y,z,rx)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);if(rx)o.rotation.x=rx;ch.add(o);return o};
+  
+  add(GEO.body,paint,0,0,0).castShadow=!lite;
+  add(GEO.glass,M.glass,0,0,0);add(GEO.roof,paint,0,0,0);
+  add(B(1.76,.42,.08),paint,0,1.2,-.05);
+  add(B(1.96,.08,2.4),M.black,0,.34,0);add(B(1.9,.05,.35),M.black,0,.31,2.25);
+  add(B(1.1,.2,.05),M.black,0,.5,2.3);add(B(1.5,.12,.05),M.black,0,.37,2.28);
+  add(B(1.95,.2,.12),M.black,0,.38,-2.25);
+  
+  const tails=[];
+  [-.6,.6].forEach(x=>{const t=add(B(.7,.14,.06),M.tail.clone(),x,.78,-2.27);tails.push(t)});
+  tails.push(add(B(.5,.04,.05),M.tail.clone(),0,.8,-2.27));
+  
+  [-1,1].forEach(s=>{
+    const l=add(new THREE.SphereGeometry(.2,12,8),M.lens,s*.68,.68,2.2);l.scale.set(1.5,.55,.5);
+    add(B(.5,.03,.04),M.lens,s*.68,.58,2.27);
+    add(B(.18,.12,.22),paint,s*1.0,1.05,.7);
+  });
+  
+  add(B(1.8,.04,.38),paint,0,1.1,-2.0,.06);
+  [-.7,.7].forEach(x=>add(B(.06,.14,.1),M.black,x,1.02,-1.95));
+  [-.6,.6].forEach(x=>add(new THREE.CylinderGeometry(.07,.07,.25,12),M.chrome,x,.32,-2.3,Math.PI/2));
+  
+  if(!lite){
+    for(let i=-.45;i<=.45;i+=.15)add(B(.03,.18,.06),M.chrome,i,.5,2.31);
+    [-1,1].forEach(s=>{
+      [.55,-.55,-1.4].forEach(z=>add(B(.01,.34,.015),M.black,s*.955,.66,z+.2));
+      [.3,-.8].forEach(z=>add(B(.03,.025,.16),M.chrome,s*.96,.88,z));
+      add(new THREE.CircleGeometry(.07,10),M.lens,s*.8,.38,2.31);
+    });
+    [-.4,.4].forEach(x=>{add(B(.45,.12,.5),M.seat,x,.95,-.2);add(B(.45,.5,.1),M.seat,x,1.2,-.5,-.15)});
+    add(B(1.5,.15,.35),M.seat,0,1.05,.65);
+    add(new THREE.TorusGeometry(.16,.02,8,20),M.black,-.4,1.15,.45,Math.PI/2.6);
+  }
+  
+  const wheels=[],front=[];
+  [[-1,1.4],[1,1.4],[-1,-1.4],[1,-1.4]].forEach(([s,z])=>{
+    const pv=new THREE.Group();pv.position.set(s*.93,.38,z);
+    const sp=new THREE.Group();
+    const tire=new THREE.Mesh(GEO.tire,M.tire);tire.rotation.z=Math.PI/2;tire.castShadow=!lite;sp.add(tire);
+    const rim=new THREE.Mesh(GEO.rim,M.rim);rim.rotation.z=Math.PI/2;sp.add(rim);
+    if(!lite){
+      [-.12,.12].forEach(o=>{const t=new THREE.Mesh(GEO.torus,M.tire);t.rotation.y=Math.PI/2;t.position.x=o;sp.add(t)});
+      for(let k=0;k<5;k++){const q=new THREE.Mesh(B(.04,.46,.07),M.rim);q.position.x=s*.145;q.rotation.x=k*Math.PI*2/5;sp.add(q)}
+      const dk=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.28,16),M.black);dk.rotation.z=Math.PI/2;sp.add(dk);
+      const cp=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,.3,12),M.chrome);cp.rotation.z=Math.PI/2;sp.add(cp);
+      const ds=new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,.03,24),M.disc);ds.rotation.z=Math.PI/2;ds.position.x=-s*.07;sp.add(ds);
+      const cl=new THREE.Mesh(B(.05,.14,.1),M.cal);cl.position.set(-s*.07,.18,.12);pv.add(cl);
+    }else{
+      sp.add(new THREE.Mesh(B(.3,.08,.05),M.black));
+    }
+    pv.add(sp);ch.add(pv);
+    add(GEO.arch,M.black,s*.955,.4,z).rotation.z=Math.PI/2;
+    wheels.push(sp);if(z>0)front.push(pv);
+  });
+  
+  let sirens=null;
+  if(police){
+    add(B(1.93,.22,2.2),M.black,0,.62,0);add(B(1,.08,.3),M.black,0,1.5,-.1);
+    const red=add(B(.45,.14,.25),new THREE.MeshStandardMaterial({color:0xff0000,emissive:0xff0000,emissiveIntensity:2}),-.25,1.58,-.1);
+    const blue=add(B(.45,.14,.25),new THREE.MeshStandardMaterial({color:0x0000ff,emissive:0x0000ff,emissiveIntensity:0}),.25,1.58,-.1);
+    sirens={red,blue};
+  }
+  
+  car.add(ch);
+  car.userData={chassis:ch,wheels,front,tails,hl:2.3,sirens};
+  return car;
+}
+
+// Politsiyachi Ofitser
+function createOfficer(){
+  const g = new THREE.Group();
+  const uMat = new THREE.MeshStandardMaterial({color: 0x1a2b4c});
+  const bMat = new THREE.MeshStandardMaterial({color: 0xffcc99});
+  const hMat = new THREE.MeshStandardMaterial({color: 0x111122});
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), uMat).translateY(1.0));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), bMat).translateY(1.55));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.35), hMat).translateY(1.75));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), uMat).translateX(-0.35).translateY(1.0));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), uMat).translateX(0.35).translateY(1.0));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), hMat).translateX(-0.15).translateY(0.35));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), hMat).translateX(0.15).translateY(0.35));
+  g.visible = false;
+  return g;
+}
+
+// ===== OBYEKTLAR YARATISH =====
+const player=createCar(0xb30000,false,false);
+player.position.set(4,0,0);scene.add(player);
+[-.6,.6].forEach(x=>{
+  const sl=new THREE.SpotLight(0xffffdd,2.5,60,Math.PI/6,.5,1);
+  sl.position.set(x,.8,2.2);sl.target.position.set(x,0,18);player.add(sl,sl.target);
+});
+
+const police=createCar(0xffffff,true,false);
+police.position.set(-3,0,-60);scene.add(police);
+const officer = createOfficer(); police.add(officer);
+officer.position.set(-1.2, -0.5, 0.5); // Mashina ichida
+
+// AI Trafik
+const traffic=[],colors=[0xeeeeee,0x111111,0x2255cc,0xcccc22,0x228844,0x888888,0xdd5511,0x7a1fa2,0x1a1a66,0xb0b0b8];
+for(let i=0;i<18;i++){
+  const m=createCar(colors[i%colors.length],false,true);
+  const dir=i%2?1:-1,lane=dir>0?(i%4<2?3:9):(i%4<2?-3:-9);
+  let z=(Math.random()-.5)*600;
+  m.position.set(lane,0,z);m.rotation.y=dir>0?0:Math.PI;scene.add(m);
+  const base=(14+Math.random()*14);
+  traffic.push({m,dir,lane,base,v:base,hl:m.userData.hl});
+}
+
+// ===== O'YIN MANTIQI =====
+let speed=0, steer=0, fuel=45, cash=150000, crashT=0;
+const CAP=60, PRICE=9000, maxSpeed=200, accel=40;
+let isGameOver = false;
+let policeState = 'PATROL'; 
+let policeTimer = 0, isTicketed = false, violationReason = '';
+
+const keys={w:0,s:0,a:0,d:0,sp:0};
+const kmap={KeyW:'w',ArrowUp:'w',KeyS:'s',ArrowDown:'s',KeyA:'a',ArrowLeft:'a',KeyD:'d',ArrowRight:'d',Space:'sp'};
+let camMode=0;
+
+// Tovush (Dvigatel)
+let audio,osc,osc2,gain;
+function startAudio(){
+  if(audio)return;
+  audio=new (window.AudioContext||window.webkitAudioContext)();
+  osc=audio.createOscillator();osc2=audio.createOscillator();gain=audio.createGain();
+  osc.type='sawtooth';osc2.type='square';
+  const f=audio.createBiquadFilter();f.type='lowpass';f.frequency.value=600;
+  osc.connect(f);osc2.connect(f);f.connect(gain);gain.connect(audio.destination);
+  gain.gain.value=.03;osc.start();osc2.start();
+}
+
+addEventListener('keydown',e=>{
+  startAudio();
+  if(kmap[e.code]){keys[kmap[e.code]]=1;e.preventDefault()}
+  if(e.code==='KeyC')camMode^=1;
+});
+addEventListener('keyup',e=>{if(kmap[e.code])keys[kmap[e.code]]=0});
+
+function hitCheck(o,hl){
+  const dx=player.position.x-o.position.x,dz=player.position.z-o.position.z,lim=2.3+hl;
+  if(Math.abs(dx)<2.1&&Math.abs(dz)<lim){
+    if(Math.abs(dz)/lim>Math.abs(dx)/2.1)player.position.z+=Math.sign(dz)*.4;else player.position.x+=Math.sign(dx)*.4;
+    if(Math.abs(speed)>8){speed*=-.25;crashT=1}
+    return true;
+  }
+  return false;
+}
+function shiftWorld(dz){
+  player.position.z+=dz;police.position.z+=dz;camera.position.z+=dz;
+  traffic.forEach(t=>t.m.position.z+=dz);
+}
+
+function triggerGameOver() {
+    isGameOver = true;
+    $('game-over-ui').style.display = 'flex';
+    speed = 0; keys.w = 0;
+}
+
+const clock=new THREE.Clock();let sirenT=0;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.1);
+  
+  if (isGameOver) { renderer.render(scene,camera); return; }
+
+  const hasFuel=fuel>0,thr=keys.w&&hasFuel;
+
+  // Fizika
+  if(thr)speed+=accel*dt*(1-Math.abs(speed)/(maxSpeed*1.15));
+  else if(keys.s)speed-=accel*1.5*dt;
+  else speed*=Math.pow(.96,dt*60);
+  if(keys.sp)speed*=Math.pow(.85,dt*60);
+  speed=Math.max(-maxSpeed/3,Math.min(maxSpeed,speed));
+  if(Math.abs(speed)<.1)speed=0;
+  fuel=Math.max(0,fuel-dt*(.02+(thr?.13*(Math.abs(speed)/maxSpeed+.15):0)));
+
+  const braking=keys.s&&speed>1||keys.sp;
+  player.userData.tails.forEach(t=>t.material.emissiveIntensity=braking?4:1.2);
+
+  // Harakat va Kolliziya
+  const mv=speed*dt*.5;
+  const nx=player.position.x+Math.sin(player.rotation.y)*mv,nz=player.position.z+Math.cos(player.rotation.y)*mv;
+  let hit=false;
+  for(const b of colliders)if(nx>b.minX-1.2&&nx<b.maxX+1.2&&nz>b.minZ-1.2&&nz<b.maxZ+1.2){hit=true;break}
+  if(!hit){player.position.x=nx;player.position.z=nz}
+  else{if(Math.abs(speed)>8)crashT=1;speed=-speed*.3}
+
+  // Rul va Og'ish
+  const target=(keys.a?1:0)-(keys.d?1:0);
+  steer+=(target-steer)*Math.min(1,dt*6);
+  const grip=Math.min(1,Math.abs(speed)/20);
+  player.rotation.y+=steer*1.8*dt*grip*(speed>=0?1:-1);
+  player.userData.front.forEach(p=>p.rotation.y=steer*.45);
+  player.userData.wheels.forEach(w=>w.rotation.x+=speed*dt*1.4);
+  player.userData.chassis.rotation.x=Math.max(-.05,Math.min(.05,-steer*.02));
+  player.userData.chassis.rotation.z=steer*Math.abs(speed)/maxSpeed*.1;
+
+  // --- SVETOFOR VA RADAR MANTIQI ---
+  lightTimer += dt;
+  if (lightTimer < 5) trafficLightState = 0;
+  else if (lightTimer < 6.5) trafficLightState = 1;
+  else if (lightTimer < 11.5) trafficLightState = 2;
+  else lightTimer = 0;
+
+  redL.material.color.setHex(trafficLightState === 0 ? 0xff0000 : 0x550000);
+  yellowL.material.color.setHex(trafficLightState === 1 ? 0xffff00 : 0x555500);
+  greenL.material.color.setHex(trafficLightState === 2 ? 0x00ff00 : 0x005500);
+
+  if (trafficLightState === 0 && player.position.z > 75 && player.position.z < 85 && speed > 5) {
+      if (policeState === 'PATROL') { violationReason = 'Qizil chiroqda o\'tish'; policeState = 'CHASING'; $('warning').style.display = 'block'; $('warning').innerText = '🚨 QIZIL CHIROQDA O\'TDINGIZ! 🚨'; }
+  }
+  if (player.position.z > 145 && player.position.z < 155 && speed > 80) {
+      if (policeState === 'PATROL') { violationReason = 'Radardan tez o\'tish'; policeState = 'CHASING'; $('warning').style.display = 'block'; $('warning').innerText = '🚨 TEZLIKNI OSHIRDINGIZ (RADAR)! 🚨'; }
+  }
+
+  // AI Trafik
+  traffic.forEach(t=>{
+    const m=t.m;let tv=t.base;
+    for(const o of traffic){
+      if(o===t||o.dir!==t.dir||Math.abs(o.lane-t.lane)>1)continue;
+      const gap=(o.m.position.z-m.position.z)*t.dir-(o.hl+t.hl);
+      if(gap>0&&gap<20)tv=Math.min(tv,gap<4?0:o.v);
+    }
+    const pdx=Math.abs(player.position.x-m.position.x),pgap=(player.position.z-m.position.z)*t.dir-(2.3+t.hl);
+    if(pdx<2.4&&pgap>0&&pgap<20)tv=Math.min(tv,pgap<4?0:Math.max(0,Math.cos(player.rotation.y)*t.dir*speed*.5));
+    t.tails_on=tv<t.v-1;
+    t.v+=(tv-t.v)*Math.min(1,dt*2);
+    m.position.z+=t.v*dt*t.dir;
+    m.position.x+=(t.lane-m.position.x)*Math.min(1,dt*2);
+    m.userData.wheels.forEach(w=>w.rotation.x+=t.v*dt*2.7);
+    m.userData.tails.forEach(l=>l.material.emissiveIntensity=t.tails_on?4:1.2);
+    if(hitCheck(m,t.hl))t.v*=.5;
+    const dz=m.position.z-player.position.z;
+    if(Math.abs(dz)>360){
+      for(let k=0;k<6;k++){
+        const nz=player.position.z+(dz>0?-1:1)*(320+Math.random()*40+k*15);
+        if(!traffic.some(o=>o!==t&&Math.abs(o.lane-t.lane)<1&&Math.abs(o.m.position.z-nz)<14)){m.position.z=nz;m.position.x=t.lane;t.v=t.base;break}
+      }
+    }
+  });
+
+  // --- POLITSIYA AI (Statemachine) ---
+  sirenT+=dt*10;
+  if(speed>100 && policeState === 'PATROL') {
+      violationReason = 'Tezlikni oshirish (100+ km/h)';
+      policeState = 'CHASING';
+      $('warning').style.display = 'block';
+      $('warning').innerText = '🚨 POLITSIYA SIZNI QUVMOQDA! 🚨';
+  }
+
+  if (policeState === 'PATROL') {
+      police.position.z += 25 * dt;
+      police.rotation.y = 0;
+      if (police.position.z > player.position.z + 150) police.position.z = player.position.z - 150;
+      police.userData.wheels.forEach(w => w.rotation.x += 25 * dt * 1.4);
+      $('warning').style.display = 'none';
+  } 
+  else if (policeState === 'CHASING') {
+      const a = Math.atan2(player.position.x - police.position.x, player.position.z - police.position.z);
+      police.rotation.y = a;
+      police.position.x += Math.sin(a) * 55 * dt;
+      police.position.z += Math.cos(a) * 55 * dt;
+      police.userData.wheels.forEach(w => w.rotation.x += 55 * dt * 1.4);
+
+      if (speed < 1 && Math.hypot(player.position.x - police.position.x, player.position.z - police.position.z) < 15) {
+          policeState = 'STOPPING'; policeTimer = 0;
+          $('warning').style.display = 'none';
+      }
+  }
+  else if (policeState === 'STOPPING') {
+      policeTimer += dt;
+      const tx = player.position.x - Math.sin(player.rotation.y) * 6;
+      const tz = player.position.z - Math.cos(player.rotation.y) * 6;
+      police.position.x = THREE.MathUtils.lerp(police.position.x, tx, 0.1);
+      police.position.z = THREE.MathUtils.lerp(police.position.z, tz, 0.1);
+      police.rotation.y = THREE.MathUtils.lerp(police.rotation.y, player.rotation.y, 0.1);
+      police.userData.wheels.forEach(w => w.rotation.x += 20 * dt);
+      
+      if (policeTimer > 1.5) { 
+          policeState = 'OFFICER_OUT'; 
+          officer.visible = true; 
+          officer.position.set(-1.2, 0, 0.5); 
+      }
+  }
+  else if (policeState === 'OFFICER_OUT') {
+      officer.position.x = THREE.MathUtils.lerp(officer.position.x, 1.2, 0.05);
+      officer.rotation.y = Math.PI / 2;
+      if (Math.abs(officer.position.x - 1.2) < 0.1) { policeState = 'TICKETING'; policeTimer = 0; }
+  }
+  else if (policeState === 'TICKETING') {
+      policeTimer += dt;
+      if (!isTicketed) {
+          isTicketed = true;
+          $('doc-ui').style.display = 'block';
+          $('violation-reason').innerText = violationReason;
+          cash -= 10000;
+          if (cash <= 0) {
+              cash = 0;
+              setTimeout(() => { $('doc-ui').style.display = 'none'; triggerGameOver(); }, 2000);
+          } else {
+              setTimeout(() => { $('doc-ui').style.display = 'none'; }, 3000);
+          }
+      }
+      if (policeTimer > 3.5) policeState = 'OFFICER_IN';
+  }
+  else if (policeState === 'OFFICER_IN') {
+      officer.position.x = THREE.MathUtils.lerp(officer.position.x, -1.2, 0.05);
+      officer.rotation.y = 0;
+      if (Math.abs(officer.position.x + 1.2) < 0.1) { policeState = 'DRIVING_AWAY'; policeTimer = 0; officer.visible = false; }
+  }
+  else if (policeState === 'DRIVING_AWAY') {
+      policeTimer += dt;
+      police.position.z -= 40 * dt;
+      if (policeTimer > 3) { 
+          policeState = 'PATROL'; 
+          isTicketed = false; 
+          police.position.set(-3, 0, player.position.z - 150); 
+      }
+  }
+
+  const sr=police.userData.sirens,on=Math.sin(sirenT)>0;
+  sr.red.material.emissiveIntensity=on?4:0;sr.blue.material.emissiveIntensity=on?0:4;
+  hitCheck(police,2.3);
+
+  // --- YOQILG'I QUYISH ---
+  const zs=120+400*Math.round((player.position.z-120)/400);
+  const inSt=player.position.x>16&&player.position.x<32&&Math.abs(player.position.z-zs)<9;
+  let msg='';
+  if(crashT>0){crashT-=dt;msg="💥 TO'QNASHUV!"}
+  else if(inSt&&Math.abs(speed)<6){
+    if(fuel>=CAP-.05)msg="✅ Bak to'la";
+    else if(cash<PRICE*.2)msg="💵 Pul yetmaydi";
+    else{const a=Math.min(12*dt,CAP-fuel,cash/PRICE);fuel+=a;cash-=a*PRICE;msg="⛽ Yoqilg'i quyilmoqda..."}
+  }
+  else if(fuel<=0)msg="YOQILG'I TUGADI!";
+  else if(fuel<10)msg="⚠️ Yoqilg'i kam! Shaxobchani toping";
+  $('msg').textContent=msg;
+
+  // Dvigatel ovozi
+  if(audio){
+    const r=Math.abs(speed)/maxSpeed,gr=Math.min(5,Math.floor(r*6)),f=50+(gr+(r*6)%1)*45+(thr?25:0);
+    osc.frequency.value=f;osc2.frequency.value=f*.5;gain.gain.value=hasFuel?.025+(thr?.03:0):0;
+  }
+
+  // Cheksiz yo'l
+  if(player.position.z>600)shiftWorld(-1200);else if(player.position.z<-600)shiftWorld(1200);
+
+  // Kamera
+  player.updateMatrixWorld(true);
+  const look=new THREE.Vector3();
+  if(camMode===0){
+    camera.position.lerp(new THREE.Vector3(0,3.5,-8).applyMatrix4(player.matrixWorld),.15);
+    look.set(0,1.2,7).applyMatrix4(player.matrixWorld);
+  }else{
+    camera.position.copy(new THREE.Vector3(-.4,1.3,.5).applyMatrix4(player.matrixWorld));
+    look.set(-.4,1.2,15).applyMatrix4(player.matrixWorld);
+  }
+  const sh=Math.max(0,Math.abs(speed)-120)*.0006;
+  camera.position.x+=(Math.random()-.5)*sh;camera.position.y+=(Math.random()-.5)*sh;
+  camera.lookAt(look);
+  camera.fov=65+Math.abs(speed)/maxSpeed*12;camera.updateProjectionMatrix();
+  sun.position.set(player.position.x+100,200,player.position.z-50);sun.target.position.copy(player.position);
+
+  // HUD
+  $('spd').textContent=Math.abs(Math.round(speed));
+  $('gear').textContent=speed<-.5?'R':speed<.5?'N':Math.min(6,1+Math.floor(speed/35));
+  $('fuelfill').style.width=(fuel/CAP*100)+'%';
+  $('fuelfill').className=fuel<10?'low':'';
+  $('fueltxt').textContent='⛽ '+fuel.toFixed(1)+' L';
+  $('cash').textContent='💵 '+Math.round(cash).toLocaleString('ru-RU')+" so'm";
+  $('dist').textContent='Shaxobcha: '+Math.round(Math.hypot(SX-player.position.x,zs-player.position.z))+' m';
+
+  renderer.render(scene,camera);
+}
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
